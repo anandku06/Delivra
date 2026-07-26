@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Environment files
+.env
+.env.local
+.env*.local
+
+# Build outputs
+.next/
+dist/
+build/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Assignment docs (not for repo)
+ReachInbox_Assignment_System_Design.md
+Software Development Intern Assignment*.md
+walkthrough.md
+walkthrough_f
+frontend/AGENTS.md
+frontend/CLAUDE.md
