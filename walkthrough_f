@@ -1,0 +1,87 @@
+# Delivra Frontend — Implementation Walkthrough
+
+## What Was Built
+
+A complete **Next.js 16 + Tailwind v4 + TypeScript** frontend for the Delivra email scheduler, matching the Figma design. The app connects to the existing Express backend on port `3001`.
+
+## Architecture
+
+```
+frontend/
+├── app/
+│   ├── globals.css         # Tailwind v4 theme (colors, animations, skeletons)
+│   ├── layout.tsx          # Root layout with Inter font + Providers
+│   ├── page.tsx            # Entry point — shows Login or Dashboard
+│   └── providers.tsx       # GoogleOAuth + AuthContext + Toaster
+├── components/
+│   ├── login-page.tsx      # Google OAuth login (credential flow / id_token)
+│   ├── dashboard.tsx       # Main orchestrator with auto-refresh
+│   ├── header.tsx          # Top bar: "ONE" logo, Compose button, user dropdown
+│   ├── sidebar.tsx         # Scheduled/Sent tabs with count badges
+│   ├── scheduled-table.tsx # Scheduled emails table with loading + empty states
+│   ├── sent-table.tsx      # Sent emails table with loading + empty states
+│   ├── compose-modal.tsx   # Full compose form with CSV upload + scheduling
+│   ├── status-badge.tsx    # Color-coded status pill badges
+│   └── empty-state.tsx     # Empty state + shimmer skeleton components
+├── lib/
+│   ├── api.ts              # API client with JWT auth header injection
+│   ├── auth-context.tsx    # React context for auth state management
+│   └── types.ts            # TypeScript interfaces matching backend schemas
+├── .env.local              # Google Client ID env variable
+└── next.config.ts          # API proxy rewrites + Google image domains
+```
+
+## Features Implemented
+
+| Feature | Status | Details |
+|---------|--------|---------|
+| Google OAuth Login | ✅ | Real Google login using credential flow (id_token) |
+| User Info Display | ✅ | Name, email, avatar in header dropdown |
+| Logout | ✅ | Dropdown with sign-out, clears JWT |
+| Scheduled Emails Tab | ✅ | Table with recipient, subject, time, status |
+| Sent Emails Tab | ✅ | Table with recipient, subject, sent time, status |
+| Compose New Email | ✅ | Modal with subject, body, recipients, CSV upload |
+| CSV File Upload | ✅ | Parse CSV/TXT for email addresses |
+| Schedule Settings | ✅ | Start time, delay between emails, hourly limit |
+| Loading States | ✅ | Shimmer skeleton animations |
+| Empty States | ✅ | Friendly messages with icons |
+| Error Handling | ✅ | Toast notifications for all errors |
+| Auto-refresh | ✅ | 15-second polling for email status updates |
+| Responsive Design | ✅ | Mobile-friendly with hidden sidebar on small screens |
+
+## Design Decisions
+
+- **Credential Flow**: Uses `GoogleLogin` component (not implicit flow) to get `id_token` that the backend expects
+- **API Proxy**: Next.js rewrites `/api/*` → `http://localhost:3001/api/*` to avoid CORS issues
+- **JWT Storage**: Stored in `localStorage` with auto-restoration on page load
+- **Color Palette**: Green brand colors (`#10b981` family) matching the Figma's green accent theme
+
+## Setup Steps Required
+
+1. **Install the new dependencies**:
+   ```bash
+   cd frontend
+   npm install @react-oauth/google react-hot-toast
+   ```
+
+2. **Clean up stale config files** (from earlier Vite attempt):
+   ```bash
+   # Delete these if they exist in frontend/:
+   del postcss.config.js tailwind.config.js vite.config.ts
+   ```
+
+3. **Set your Google Client ID** in `frontend/.env.local`:
+   ```
+   NEXT_PUBLIC_GOOGLE_CLIENT_ID=your_real_google_client_id
+   ```
+
+4. **Also set the same Client ID** in `backend/.env`:
+   ```
+   GOOGLE_CLIENT_ID=your_real_google_client_id
+   ```
+
+5. **Run the dev server**:
+   ```bash
+   npm run dev
+   ```
+   Frontend runs on `http://localhost:3000`, backend on `http://localhost:3001`.
