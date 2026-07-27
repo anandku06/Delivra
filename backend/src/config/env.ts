@@ -4,6 +4,8 @@ const envSchema = z.object({
   // Database
   DATABASE_URL: z.string().url("DATABASE_URL must be a valid URL"),
 
+  FRONTEND_URL: z.string().url("FRONTEND_URL must be a valid URL"),
+
   // Redis
   REDIS_URL: z.string().url("REDIS_URL must be a valid URL"),
 
