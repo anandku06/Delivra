@@ -1,296 +1,233 @@
-# Delivra — Full-Stack Email Job Scheduler
+# Delivra — Email Scheduling & Campaign Management
 
-A **production-grade email scheduler service + dashboard** built for the ReachInbox hiring assignment. Schedule, queue, and send emails at scale with rate limiting, persistence, and a clean dashboard UI.
+Delivra is a full-stack email scheduling platform that allows users to create email campaigns, upload recipient lists, schedule emails, and track their status through a centralized dashboard. It uses background job processing and Redis-backed rate limiting to manage scheduled email delivery reliably.
 
-![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
-![Next.js](https://img.shields.io/badge/Next.js-000000?logo=next.js&logoColor=white)
-![Express](https://img.shields.io/badge/Express-000000?logo=express&logoColor=white)
-![BullMQ](https://img.shields.io/badge/BullMQ-E63946?logo=redis&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white)
-![Redis](https://img.shields.io/badge/Redis-DC382D?logo=redis&logoColor=white)
-![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-06B6D4?logo=tailwindcss&logoColor=white)
+<p align="center">
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white" />
+  <img alt="Next.js" src="https://img.shields.io/badge/Next.js-000000?logo=next.js&logoColor=white" />
+  <img alt="Express.js" src="https://img.shields.io/badge/Express.js-000000?logo=express&logoColor=white" />
+  <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white" />
+  <img alt="Redis" src="https://img.shields.io/badge/Redis-DC382D?logo=redis&logoColor=white" />
+  <img alt="BullMQ" src="https://img.shields.io/badge/BullMQ-E63946?logo=redis&logoColor=white" />
+  <img alt="Docker" src="https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white" />
+</p>
 
----
+## ✨ Features
 
-## 🚀 Features
+- **Email Scheduling:** Schedule email campaigns for a specific start time.
+- **Bulk Recipient Import:** Upload recipient lists using CSV or TXT files.
+- **Background Job Processing:** Process scheduled emails asynchronously using BullMQ workers.
+- **Rate Limiting:** Enforce hourly email limits with Redis-backed atomic operations.
+- **Retry Mechanism:** Automatically retry failed jobs with exponential backoff.
+- **Campaign Management:** View campaign summaries and monitor email statuses.
+- **Email Cancellation:** Cancel emails that have not yet been sent.
+- **Google Authentication:** Authenticate users using Google OAuth 2.0 and JWT.
+- **Persistent Storage:** Store campaign and email information in PostgreSQL.
+- **Containerized Infrastructure:** Run PostgreSQL and Redis locally using Docker Compose.
 
-### Backend
-- **Email Scheduling via BullMQ** — delayed jobs with configurable timing (no cron)
-- **Persistence** — emails survive server restarts; future emails still send at the correct time
-- **Rate Limiting** — configurable `MAX_EMAILS_PER_HOUR` enforced via Redis counters
-- **Worker Concurrency** — configurable concurrent job processing (`WORKER_CONCURRENCY=5`)
-- **Delay Between Sends** — minimum 2-second gap between individual emails (configurable)
-- **Idempotency** — duplicate job IDs prevent the same email from being sent twice
-- **Multi-sender Support** — round-robin sender selection from the `senders` table
-- **Ethereal SMTP** — fake email sending for testing (auto-creates accounts on first boot)
-- **Google OAuth** — real Google login with JWT session tokens
-- **Delete Scheduled Emails** — cancel unsent emails and remove BullMQ jobs
+## 🏗️ Architecture
 
-### Frontend
-- **Google OAuth Login** — real Google sign-in with user profile display
-- **Dashboard** — header with user info, sidebar tabs, auto-refreshing tables
-- **Scheduled Emails Tab** — view pending emails with status badges and delete functionality
-- **Sent Emails Tab** — view sent/failed emails with timestamps
-- **Compose Email Modal** — subject, body, CSV/TXT file upload for recipients, scheduling controls
-- **Loading & Empty States** — shimmer skeletons and friendly empty messages
-- **Toast Notifications** — success/error feedback for all actions
-- **Responsive Design** — works on desktop and mobile
-
----
-
-## 🏗 Architecture
-
-```
-┌─────────────────────┐     ┌─────────────────────────────────────┐
-│   Next.js Frontend  │────▶│   Express.js Backend (port 3001)    │
-│   (port 3000)       │     │                                     │
-│                     │     │   ┌─────────────┐  ┌─────────────┐  │
-│  • Google Login     │     │   │  Auth Module │  │ Email Module│  │
-│  • Dashboard        │     │   │  (JWT/OAuth) │  │ (CRUD/API)  │  │
-│  • Compose Modal    │     │   └─────────────┘  └──────┬──────┘  │
-│  • Email Tables     │     │                           │         │
-└─────────────────────┘     │                    ┌──────▼──────┐  │
-                            │                    │   BullMQ    │  │
-                            │                    │   Queue     │  │
-                            │                    └──────┬──────┘  │
-                            │                           │         │
-                            │                    ┌──────▼──────┐  │
-                            │                    │  Email      │  │
-                            │                    │  Worker     │  │
-                            │                    └──────┬──────┘  │
-                            └───────────────────────────┼─────────┘
-                                                        │
-                            ┌───────────┐        ┌──────▼──────┐
-                            │ PostgreSQL│        │   Redis     │
-                            │ (data)    │        │ (jobs/rate  │
-                            │           │        │  limiting)  │
-                            └───────────┘        └─────────────┘
-                                                        │
-                                                 ┌──────▼──────┐
-                                                 │  Ethereal   │
-                                                 │  SMTP       │
-                                                 └─────────────┘
+```text
+              Next.js Dashboard
+                     |
+                     | REST API + JWT
+                     v
+                Express.js API
+                     |
+          +----------+----------+
+          |                     |
+          v                     v
+      PostgreSQL           Google OAuth
+          |
+          | Scheduled Email Records
+          |
+          v
+      BullMQ Queue <------> Redis
+          |
+          v
+      Email Worker
+          |
+          v
+    Redis Rate Limiter
+          |
+          v
+      SMTP Transport
 ```
 
-### How Scheduling Works
+## 🔄 How It Works
 
-1. User submits a campaign via the **Compose Modal** (subject, body, recipients, start time, delay, hourly limit)
-2. Backend creates a **campaign** record and individual **scheduled_email** rows in PostgreSQL
-3. For each email, a **BullMQ delayed job** is created with a computed delay based on:
-   - Start time offset
-   - Delay between emails (e.g., 2 seconds)
-   - Hourly limit chunking (emails beyond the limit are pushed to the next hour window)
-4. When the delay expires, the **worker** picks up the job and sends via Ethereal SMTP
-5. The email status is updated to `SENT` or `FAILED` in the database
+1. The user signs in and creates an email campaign.
+2. Recipient details and scheduling preferences are submitted to the backend.
+3. Campaign and email records are stored in PostgreSQL.
+4. BullMQ creates delayed jobs backed by Redis.
+5. Background workers process jobs when they become eligible.
+6. Redis-backed rate limiting controls the sending frequency.
+7. If an hourly limit is reached, the job is rescheduled for a later time.
+8. Email statuses are updated so users can track scheduled, sent, and failed messages.
 
-### How Persistence Works
+## ⚙️ Reliability and Job Processing
 
-- All scheduled emails are stored in **PostgreSQL** with their exact `scheduled_time`
-- BullMQ jobs are backed by **Redis** with persistence enabled
-- On server restart, the BullMQ worker automatically resumes processing delayed jobs
-- Jobs are **not duplicated** — deterministic job IDs (`email-{uuid}`) ensure idempotency
+Delivra uses several mechanisms to make background email processing more reliable:
 
-### How Rate Limiting Works
+- **Persistent Job Scheduling:** Stores email records in PostgreSQL and queued jobs in Redis.
+- **Idempotent Job Creation:** Uses deterministic job IDs to help prevent duplicate queue entries.
+- **Exponential Backoff:** Retries failed jobs with progressively increasing delays.
+- **Atomic Rate Limiting:** Uses Redis Lua scripting to update rate-limit counters atomically.
+- **Configurable Worker Concurrency:** Controls how many jobs can be processed concurrently.
+- **Automatic Rescheduling:** Delays jobs when the configured hourly sending limit is reached.
+- **Email Status Tracking:** Maintains email and campaign status information in the database.
 
-- **Hourly chunking**: When scheduling, emails are grouped into hourly windows based on `hourlyLimit`
-  - Example: 500 recipients with `hourlyLimit=200` → emails 0-199 in hour 0, 200-399 in hour 1, 400-499 in hour 2
-- **Redis-backed counters**: The rate limiter uses Redis keys with TTL to track sends per hour window per sender
-- **Graceful handling**: When the limit is hit, jobs are delayed to the next available hour window (not dropped)
-- **Configurable**: `MAX_EMAILS_PER_HOUR` and `DEFAULT_DELAY_SECONDS` via environment variables
+## 🛠️ Tech Stack
 
----
+| Layer | Technologies |
+|---|---|
+| Frontend | Next.js, React, TypeScript, Tailwind CSS |
+| Backend | Node.js, Express.js, TypeScript |
+| Database | PostgreSQL, Drizzle ORM |
+| Background Jobs | BullMQ |
+| Queue and Rate Limiting | Redis, Lua |
+| Authentication | Google OAuth 2.0, JWT |
+| Email Transport | Nodemailer, Ethereal SMTP |
+| Infrastructure | Docker Compose |
 
-## 📦 Tech Stack
-
-| Layer      | Technology                                       |
-|------------|--------------------------------------------------|
-| Frontend   | Next.js 16, React 19, TypeScript, Tailwind CSS 4 |
-| Backend    | Express 5, TypeScript, Zod validation            |
-| Database   | PostgreSQL 16, Drizzle ORM                       |
-| Queue      | BullMQ (Redis-backed)                            |
-| Auth       | Google OAuth 2.0, JWT                            |
-| SMTP       | Ethereal Email (fake SMTP for testing)           |
-| Infra      | Docker Compose (Postgres + Redis)                |
-
----
-
-## 🛠 Setup & Running
+## 🚀 Getting Started
 
 ### Prerequisites
 
-- **Node.js** v18+
-- **Docker** (for PostgreSQL and Redis)
-- **Google Cloud Project** with OAuth 2.0 credentials
+Make sure you have the following installed:
 
-### 1. Clone the repo
+- Node.js 18 or later
+- npm
+- Docker and Docker Compose
+- Google OAuth 2.0 credentials
+
+### 1. Clone the Repository
 
 ```bash
 git clone https://github.com/anandku06/Delivra.git
 cd Delivra
 ```
 
-### 2. Start infrastructure (PostgreSQL + Redis)
+### 2. Start PostgreSQL and Redis
 
 ```bash
 docker compose up -d
 ```
 
-### 3. Configure environment variables
+### 3. Configure Environment Variables
 
-**Backend** — copy and edit `backend/.env.example`:
+Create the backend environment file:
+
 ```bash
 cp backend/.env.example backend/.env
 ```
 
-Update these values in `backend/.env`:
-```env
-GOOGLE_CLIENT_ID=your_google_client_id
-GOOGLE_CLIENT_SECRET=your_google_client_secret
-```
+Configure the required database, Redis, Google OAuth, JWT, SMTP, and frontend URL values in `backend/.env`.
 
-**Frontend** — create `frontend/.env.local`:
+Create `frontend/.env.local` and add your Google OAuth client ID:
+
 ```env
 NEXT_PUBLIC_GOOGLE_CLIENT_ID=your_google_client_id
 ```
 
-> **Google OAuth Setup**: Create credentials at [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
-> - Application type: Web application
-> - Authorized JavaScript origins: `http://localhost:3000`
-> - Authorized redirect URIs: `http://localhost:3000`
+Ensure your Google OAuth client is configured with the appropriate local development origin.
 
-### 4. Setup the backend
+### 4. Set Up the Backend
 
 ```bash
 cd backend
 npm install
-npm run db:migrate    # Run database migrations
-npm run seed          # Create Ethereal test sender accounts
+npm run db:migrate
+npm run seed
+npm run dev
 ```
 
-### 5. Start the backend
+The backend runs on port `3001` by default.
+
+### 5. Set Up the Frontend
+
+Open another terminal:
 
 ```bash
-npm run dev           # Starts on http://localhost:3001
-```
-
-### 6. Setup and start the frontend
-
-```bash
-cd ../frontend
+cd frontend
 npm install
-npm run dev           # Starts on http://localhost:3000
+npm run dev
 ```
 
-### 7. Open the app
+Open [http://localhost:3000](http://localhost:3000) in your browser and sign in with Google.
 
-Visit **http://localhost:3000** — sign in with Google and start scheduling emails!
+> Note: The commands above assume the repository's package scripts and environment template are available as described. Refer to the actual project configuration if a command or variable name differs.
 
----
+## 🔌 API Overview
 
-## 📂 Project Structure
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/auth/google` | Authenticate with Google |
+| `GET` | `/api/auth/me` | Retrieve the authenticated user's profile |
+| `POST` | `/api/emails/schedule` | Schedule a batch of emails |
+| `GET` | `/api/emails/scheduled` | Retrieve scheduled emails |
+| `GET` | `/api/emails/sent` | Retrieve sent and failed emails |
+| `DELETE` | `/api/emails/:id` | Cancel a pending email |
+| `GET` | `/api/campaigns` | Retrieve campaigns and summary counts |
+| `GET` | `/api/health` | Check API health |
 
-```
+Authenticated endpoints require a valid JWT session.
+
+## 📁 Project Structure
+
+```text
 Delivra/
 ├── backend/
-│   ├── src/
-│   │   ├── app.ts                    # Express server entry point
-│   │   ├── config/env.ts             # Environment variable parsing
-│   │   ├── db/
-│   │   │   ├── schema.ts             # Drizzle ORM schema (users, senders, campaigns, emails)
-│   │   │   ├── migrate.ts            # Migration runner
-│   │   │   └── seed.ts               # Seed Ethereal sender accounts
-│   │   ├── modules/
-│   │   │   ├── auth/                 # Google OAuth + JWT authentication
-│   │   │   ├── email/                # Email scheduling, listing, deletion
-│   │   │   └── campaign/             # Campaign listing with aggregated stats
-│   │   ├── queue/
-│   │   │   ├── emailQueue.ts         # BullMQ queue + job creation
-│   │   │   ├── connection.ts         # Redis connection factory
-│   │   │   └── rateLimiter.ts        # Redis-backed rate limiting
-│   │   ├── workers/emailWorker.ts    # BullMQ worker (processes email jobs)
-│   │   └── sender/mailer.ts          # Nodemailer transport (Ethereal SMTP)
-│   ├── drizzle/                      # Generated SQL migrations
-│   └── package.json
+│   └── src/
+│       ├── config/       # Environment configuration
+│       ├── db/           # Database schema, migrations, seed data
+│       ├── middleware/   # Request middleware and error handling
+│       ├── modules/
+│       │   ├── auth/     # Authentication and JWT
+│       │   ├── email/    # Email scheduling and management
+│       │   └── campaign/ # Campaign endpoints
+│       ├── queue/        # BullMQ queue and rate limiting
+│       ├── sender/       # SMTP transport configuration
+│       └── workers/      # Background email workers
 ├── frontend/
-│   ├── app/
-│   │   ├── globals.css               # Tailwind v4 theme + custom animations
-│   │   ├── layout.tsx                # Root layout with Inter font
-│   │   ├── page.tsx                  # Entry — Login or Dashboard
-│   │   └── providers.tsx             # Google OAuth + Auth + Toast providers
-│   ├── components/
-│   │   ├── login-page.tsx            # Google OAuth login screen
-│   │   ├── dashboard.tsx             # Main dashboard orchestrator
-│   │   ├── header.tsx                # Top bar (logo, compose, user dropdown)
-│   │   ├── sidebar.tsx               # Scheduled/Sent tab navigation
-│   │   ├── scheduled-table.tsx       # Scheduled emails table + delete
-│   │   ├── sent-table.tsx            # Sent emails table
-│   │   ├── compose-modal.tsx         # Email compose form + CSV upload
-│   │   ├── status-badge.tsx          # Color-coded status pills
-│   │   └── empty-state.tsx           # Empty state + loading skeleton
-│   ├── lib/
-│   │   ├── api.ts                    # API client with JWT auth
-│   │   ├── auth-context.tsx          # React auth context
-│   │   └── types.ts                  # TypeScript interfaces
-│   └── package.json
-└── docker-compose.yml                # PostgreSQL + Redis containers
+│   ├── app/              # Next.js routes and providers
+│   ├── components/       # Dashboard and reusable UI
+│   └── lib/              # API client, auth context, shared types
+└── docker-compose.yml    # PostgreSQL and Redis services
 ```
 
----
+## 🔐 Configuration
 
-## 🔧 Configuration
+Common environment variables include:
 
-All values are configurable via environment variables:
+| Variable | Purpose |
+|---|---|
+| `PORT` | Backend API port |
+| `DATABASE_URL` | PostgreSQL connection string |
+| `REDIS_URL` | Redis connection string |
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
+| `JWT_SECRET` | JWT signing secret |
+| `WORKER_CONCURRENCY` | Number of jobs processed concurrently |
+| `DEFAULT_DELAY_SECONDS` | Default delay between email sends |
+| `MAX_EMAILS_PER_HOUR` | Configured hourly sending limit |
 
-| Variable               | Default | Description                            |
-|------------------------|---------|----------------------------------------|
-| `PORT`                 | `3001`  | Backend server port                    |
-| `DATABASE_URL`         | —       | PostgreSQL connection string           |
-| `REDIS_URL`            | —       | Redis connection string                |
-| `GOOGLE_CLIENT_ID`     | —       | Google OAuth Client ID                 |
-| `GOOGLE_CLIENT_SECRET` | —       | Google OAuth Client Secret             |
-| `JWT_SECRET`           | —       | Secret for signing JWT tokens          |
-| `WORKER_CONCURRENCY`   | `5`     | Number of concurrent BullMQ workers    |
-| `DEFAULT_DELAY_SECONDS`| `2`     | Minimum delay between individual sends |
-| `MAX_EMAILS_PER_HOUR`  | `200`   | Maximum emails sent per hour           |
+Refer to `backend/.env.example` for the complete list of supported variables.
 
----
+## 🧪 Email Testing
 
-## 📋 API Endpoints
+The project uses **Ethereal SMTP** as a test email transport. This allows email messages to be inspected during development without delivering them to real recipients by default.
 
-| Method   | Endpoint             | Auth | Description                      |
-|----------|----------------------|------|----------------------------------|
-| `POST`   | `/api/auth/google`   | No   | Google OAuth login               |
-| `GET`    | `/api/auth/me`       | Yes  | Get current user profile         |
-| `POST`   | `/api/emails/schedule` | Yes | Schedule a batch of emails       |
-| `GET`    | `/api/emails/scheduled` | Yes | List pending/scheduled emails   |
-| `GET`    | `/api/emails/sent`   | Yes  | List sent/failed emails          |
-| `DELETE` | `/api/emails/:id`    | Yes  | Delete a scheduled email         |
-| `GET`    | `/api/campaigns`     | Yes  | List campaigns with stats        |
-| `GET`    | `/api/health`        | No   | Health check                     |
+For real email delivery, configure a suitable SMTP provider and review its sending limits, authentication requirements, and production settings.
 
----
+## 🔮 Future Improvements
 
-## ⚡ Behavior Under Load
-
-When 1000+ emails are scheduled for roughly the same time:
-
-1. Emails are **chunked by hourly limit** — with `hourlyLimit=200`, only 200 are scheduled per hour window
-2. BullMQ processes jobs with **configurable concurrency** (default: 5 parallel workers)
-3. A **minimum delay** (default: 2s) is enforced between individual sends
-4. If the rate limit is hit mid-processing, jobs are **rescheduled** to the next available window
-5. All state is persisted in PostgreSQL + Redis — no data loss on restart
-
----
-
-## 📝 Assumptions & Trade-offs
-
-- **Ethereal Email**: All emails are sent to Ethereal's fake SMTP — no real emails are delivered. Check sent emails at [ethereal.email](https://ethereal.email).
-- **Single-server**: The current setup runs on a single Node.js process. For horizontal scaling, Redis-backed BullMQ naturally supports multiple workers across instances.
-- **Hourly chunking at schedule time**: Rate limiting is pre-computed when scheduling rather than dynamically at send time. This simplifies the architecture but means changing the hourly limit after scheduling requires re-creating the campaign.
-- **JWT in localStorage**: For simplicity. In production, HTTP-only cookies would be more secure.
-
----
+- Integration with production email providers.
+- Delivery analytics and campaign performance metrics.
+- Email templates and reusable campaign drafts.
+- More detailed worker monitoring and operational logging.
+- Deployment configuration for independently scalable workers.
 
 ## 📄 License
 
-This project was built as part of the ReachInbox / Outbox Labs hiring assignment.
+No license has been specified yet.
