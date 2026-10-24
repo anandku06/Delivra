@@ -1,5 +1,8 @@
 import { Queue } from "bullmq";
+import { eq } from "drizzle-orm";
 import { createRedisConnection } from "./connection.js";
+import { db } from "../db/index.js";
+import { scheduledEmails, EMAIL_STATUS } from "../db/schema.js";
 
 export interface EmailJobPayload {
   emailId: string;
@@ -70,6 +73,10 @@ export async function addEmailJob(
  *      to exactly one live job: the second concurrent add will either return the
  *      job that the first add already created (if it arrived after step 2 of the
  *      first call) or silently de-duplicate.
+ *   4. Failure safety: If removing succeeds but adding the replacement fails
+ *      (e.g., Redis OOM or connection dropped), we reset `bullJobId: null`
+ *      and `status: SCHEDULED` in PostgreSQL so `recoverUnqueuedEmails()` can
+ *      pick it up and re-enqueue it automatically without data loss.
  *
  * Traceability is preserved because the ID never changes from the email's
  * perspective: it is always `email-{emailId}`.
@@ -91,10 +98,31 @@ export async function rescheduleEmailJob(
     }
   }
 
-  const job = await emailQueue.add("send-email", payload, {
-    jobId,
-    delay: Math.max(0, newDelayMs),
-  });
+  try {
+    const job = await emailQueue.add("send-email", payload, {
+      jobId,
+      delay: Math.max(0, newDelayMs),
+    });
 
-  return job.id ?? jobId;
+    return job.id ?? jobId;
+  } catch (err) {
+    // If adding replacement job failed after removing existing job,
+    // clear bullJobId and reset status to SCHEDULED in DB so startup recovery picks it up.
+    try {
+      await db
+        .update(scheduledEmails)
+        .set({
+          bullJobId: null,
+          status: EMAIL_STATUS.SCHEDULED,
+          error: `Reschedule failed: ${err instanceof Error ? err.message : String(err)}`,
+        })
+        .where(eq(scheduledEmails.id, payload.emailId));
+    } catch (dbErr) {
+      console.error(
+        `Failed to reset email ${payload.emailId} in DB after reschedule failure:`,
+        dbErr
+      );
+    }
+    throw err;
+  }
 }

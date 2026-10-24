@@ -221,7 +221,10 @@ export async function recoverUnqueuedEmails(): Promise<void> {
     .from(scheduledEmails)
     .where(
       and(
-        eq(scheduledEmails.status, EMAIL_STATUS.SCHEDULED),
+        inArray(scheduledEmails.status, [
+          EMAIL_STATUS.SCHEDULED,
+          EMAIL_STATUS.RATE_LIMITED,
+        ]),
         isNull(scheduledEmails.bullJobId)
       )
     );
@@ -229,7 +232,7 @@ export async function recoverUnqueuedEmails(): Promise<void> {
   if (pending.length === 0) return;
 
   console.log(
-    `🔄 Recovery: found ${pending.length} SCHEDULED email(s) with no queue job. Re-enqueuing...`
+    `🔄 Recovery: found ${pending.length} unqueued email(s) with no queue job. Re-enqueuing...`
   );
 
   const now = new Date();

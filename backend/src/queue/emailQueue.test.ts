@@ -15,10 +15,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ─── Mock BullMQ Queue ────────────────────────────────────────────────────────
 
-const { mockJobRemove, mockQueueAdd, mockQueueGetJob } = vi.hoisted(() => ({
+const { mockJobRemove, mockQueueAdd, mockQueueGetJob, mockDbUpdate } = vi.hoisted(() => ({
   mockJobRemove: vi.fn().mockResolvedValue(undefined),
   mockQueueAdd: vi.fn(),
   mockQueueGetJob: vi.fn(),
+  mockDbUpdate: vi.fn().mockReturnValue({
+    set: vi.fn().mockReturnValue({
+      where: vi.fn().mockResolvedValue(undefined),
+    }),
+  }),
 }));
 
 vi.mock("bullmq", () => {
@@ -31,6 +36,13 @@ vi.mock("bullmq", () => {
     }),
   };
 });
+
+// Mock DB
+vi.mock("../db/index.js", () => ({
+  db: {
+    update: mockDbUpdate,
+  },
+}));
 
 // Mock the connection factory (Queue constructor calls it)
 vi.mock("../queue/connection.js", () => ({
@@ -205,5 +217,25 @@ describe("rescheduleEmailJob", () => {
       payload,
       expect.objectContaining({ delay: newDelayMs })
     );
+  });
+
+  it("clears bullJobId and marks email as SCHEDULED in DB if adding replacement job fails", async () => {
+    const existingJob = makeMockJob(`email-${payload.emailId}`);
+    mockQueueGetJob.mockResolvedValue(existingJob);
+    // Queue.add fails (e.g. Redis connection drops)
+    mockQueueAdd.mockRejectedValue(new Error("Redis connection dropped"));
+
+    await expect(rescheduleEmailJob(payload, 3_600_000)).rejects.toThrow("Redis connection dropped");
+
+    // Existing job was removed
+    expect(mockJobRemove).toHaveBeenCalledTimes(1);
+
+    // DB update was triggered to clear bullJobId and reset to SCHEDULED
+    expect(mockDbUpdate).toHaveBeenCalled();
+    const setCall = mockDbUpdate.mock.results[0]?.value.set.mock.calls[0] as unknown[];
+    const payloadPassed = setCall?.[0] as Record<string, unknown>;
+    expect(payloadPassed.bullJobId).toBeNull();
+    expect(payloadPassed.status).toBe("SCHEDULED");
+    expect(payloadPassed.error).toContain("Redis connection dropped");
   });
 });

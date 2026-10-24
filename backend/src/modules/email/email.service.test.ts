@@ -297,4 +297,36 @@ describe("recoverUnqueuedEmails", () => {
     // Both were attempted
     expect(addEmailJob).toHaveBeenCalledTimes(2);
   });
+
+  it("re-enqueues RATE_LIMITED emails that have no bullJobId (e.g. after reschedule failure)", async () => {
+    const rateLimitedEmail = {
+      id: "email-rl-1",
+      senderId: "sender-1",
+      recipient: "rl@test.com",
+      scheduledTime: new Date(Date.now() + 120_000),
+      campaignId: "camp-1",
+    };
+
+    vi.mocked(db.select).mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockResolvedValue([rateLimitedEmail]),
+      }),
+    } as unknown as ReturnType<typeof db.select>);
+
+    mockQueryCampaignFindFirst.mockResolvedValueOnce({
+      id: "camp-1",
+      subject: "Rate Limit Recovery",
+      body: "<p>Recover RL</p>",
+    });
+
+    await recoverUnqueuedEmails();
+
+    expect(addEmailJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        emailId: "email-rl-1",
+        recipient: "rl@test.com",
+      }),
+      expect.any(Number)
+    );
+  });
 });
