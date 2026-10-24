@@ -11,6 +11,7 @@ import emailRoutes from "./modules/email/email.routes.js";
 import campaignRoutes from "./modules/campaign/campaign.routes.js";
 import { startEmailWorker } from "./workers/emailWorker.js";
 import { getTransporter } from "./sender/mailer.js";
+import { recoverUnqueuedEmails } from "./modules/email/email.service.js";
 
 const app = express();
 
@@ -19,7 +20,8 @@ const app = express();
 app.use(helmet());
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL ?? "http://localhost:3000",
+    // Use the Zod-validated env value (fixes C19: previously used raw process.env)
+    origin: env.FRONTEND_URL,
     credentials: true,
   })
 );
@@ -57,12 +59,21 @@ async function start() {
     console.error("⚠️ SMTP init failed — emails won't send:", err);
   }
 
+  // Recover any SCHEDULED emails that were not enqueued due to a prior crash
+  // (emails with bullJobId = NULL are safe to re-enqueue; addEmailJob uses
+  // deterministic IDs so re-running on already-queued emails is a no-op)
+  try {
+    await recoverUnqueuedEmails();
+  } catch (err) {
+    console.error("⚠️ Recovery scan failed — some emails may be delayed:", err);
+  }
+
   // Start the BullMQ email worker
   const worker = startEmailWorker();
   console.log("📧 Email worker started");
 
-  // Start Express server
-  app.listen(env.PORT, () => {
+  // Start Express server and keep a reference for graceful shutdown
+  const server = app.listen(env.PORT, () => {
     console.log(`
 ╔══════════════════════════════════════════════════╗
 ║                                                  ║
@@ -75,11 +86,23 @@ async function start() {
     `);
   });
 
-  // Graceful shutdown
+  /**
+   * Graceful shutdown (C6 fix):
+   * Previously the HTTP server was not closed before the worker, so new requests
+   * could arrive while the worker was draining. The corrected order is:
+   *   1. Stop accepting new HTTP connections (server.close)
+   *   2. Let the worker finish any in-progress jobs (worker.close)
+   *   3. Exit
+   */
   const shutdown = async (signal: string) => {
     console.log(`\n🛑 ${signal} received. Shutting down gracefully...`);
 
-    // Close the worker (finishes current jobs)
+    // 1. Stop accepting new connections
+    server.close(() => {
+      console.log("✅ HTTP server closed");
+    });
+
+    // 2. Finish in-flight jobs and close the worker
     await worker.close();
     console.log("✅ Worker closed");
 

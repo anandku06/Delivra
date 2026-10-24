@@ -16,7 +16,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "pg_isready -U ${DELIVRA_DB_USER:-delivra_user} -d ${DELIVRA_DB_NAME:-delivra_user_service}",
+          "pg_isready -U ${USER_DB_USER:-delivra_user} -d ${USER_DB_NAME:-delivra}",
         ]
       interval: 10s
       timeout: 5s

@@ -48,7 +48,7 @@ export function Header({ user, onCompose }: HeaderProps) {
           </svg>
         </div>
         <h1 className="text-xl font-bold text-foreground tracking-tight">
-          ONE
+          Delivra
         </h1>
       </div>
 

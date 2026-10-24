@@ -214,18 +214,57 @@ Common environment variables include:
 
 Refer to `backend/.env.example` for the complete list of supported variables.
 
-## 🧪 Email Testing
+## 🧪 Testing & Verification
 
-The project uses **Ethereal SMTP** as a test email transport. This allows email messages to be inspected during development without delivering them to real recipients by default.
+The backend includes a comprehensive unit and integration test suite built with **Vitest**:
 
-For real email delivery, configure a suitable SMTP provider and review its sending limits, authentication requirements, and production settings.
+```bash
+cd backend
+npm test
+```
+
+### Test Coverage Highlights
+- **Atomic Rate Limiter (`rateLimiter.test.ts`):** Verifies single-pass Lua atomic consume behavior, boundary condition handling, elimination of over-count race conditions, and concurrent request limits.
+- **Queue Reschedule & Idempotency (`emailQueue.test.ts`):** Validates deterministic job IDs (`email-{emailId}`), correct removal before re-adding during reschedule, and duplicate suppression.
+- **Worker Stall & Retry Handling (`emailWorker.test.ts`):** Verifies database status updates to `FAILED` when retries are exhausted (stall recovery), transient error retry retention, idempotency skip for already-sent emails, and state cleanup on new attempts.
+- **Service Transaction & Crash Recovery (`email.service.test.ts`):** Validates transactional database writes (no orphan records on DB failure), partial Redis failure tolerance, and automatic startup recovery for un-enqueued emails via `recoverUnqueuedEmails()`.
+
+To run the TypeScript type checks:
+```bash
+# Backend
+cd backend && npm run typecheck
+
+# Frontend
+cd frontend && npm run build
+```
+
+## ⚖️ Assumptions, Shortcuts & Architectural Trade-offs
+
+1. **Pre-computed Scheduling vs. Dynamic Jitter:**
+   - *Trade-off:* Delays between emails are pre-computed as incremental timestamps at schedule time (`startTime + i * delayBetweenEmails`). This keeps worker jobs stateless and avoids blocking sleeping worker threads.
+   - *Consideration:* If a severe rate-limit backlog occurs, jobs reschedule for the next hour window start.
+
+2. **Single Atomic Lua Script for Rate Limiting:**
+   - *Decision:* Rather than an `INCR` followed by a rollback `DECR` (which introduced a window for race conditions), a single atomic Lua script checks `current < limit` before incrementing.
+   - *Guarantee:* Guarantees that concurrent workers across multiple instances never exceed the configured hourly quota.
+
+3. **Two-Phase Commit Isolation (DB Transaction + Queue Enqueue):**
+   - *Decision:* PostgreSQL campaign and email records are committed within a database transaction before BullMQ job creation.
+   - *Crash Recovery:* If the server or Redis crashes mid-enqueue, the database records remain marked as `SCHEDULED` with `bullJobId = NULL`. The `recoverUnqueuedEmails()` recovery routine executes automatically on backend boot to recover and enqueue any orphaned emails.
+
+4. **Deterministic BullMQ Job Identifiers:**
+   - *Decision:* Jobs utilize deterministic IDs formatted as `email-{emailId}` across initial adds and reschedules.
+   - *Guarantee:* Prevents duplicate jobs from ever existing simultaneously in the queue for the same recipient.
+
+5. **Sender Selection:**
+   - *Shortcut:* Currently, the campaign assigns the primary active sender. In a multi-tenant enterprise system, a round-robin or least-loaded sender distribution strategy can be enabled across senders.
 
 ## 🔮 Future Improvements
 
-- Integration with production email providers.
-- Delivery analytics and campaign performance metrics.
+- Integration with production email providers (SendGrid, AWS SES, Resend).
+- Live Bull Board dashboard for visual queue monitoring.
+- Delivery analytics, open tracking, and campaign performance metrics.
 - Email templates and reusable campaign drafts.
-- More detailed worker monitoring and operational logging.
 - Deployment configuration for independently scalable workers.
 
 ## 📄 License
